@@ -1,0 +1,35 @@
+int drivePower = 0;
+int steer = 0;
+
+void setDrive(int power, int turn) {
+  drivePower = power;
+  steer = turn;
+}
+
+task drive() {
+  while(true) {
+    if (drivePower <= 0) {
+      OnRev(OUT_ABC, -drivePower);
+      continue;
+    }
+
+    int left = 100;
+    if (steer > 0) {
+      left -= steer / 2;
+    }
+
+    int right = 100;
+    if (steer < 0) {
+      right += steer / 2;
+    }
+
+    left = (left * drivePower) / 100;
+    right = (right * drivePower) / 100;
+
+    int ave = (left + right) / 2;
+
+    OnFwd(OUT_A, left);
+    OnFwd(OUT_B, right);
+    OnFwd(OUT_C, ave);
+  }
+}

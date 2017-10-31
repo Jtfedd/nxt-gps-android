@@ -1,0 +1,243 @@
+#include "btio.nxc"
+#include "drivelib.nxc"
+
+bool hasBluetooth;
+string msgIn;
+string msgOut;
+
+long latitude;  // Like y coordinate
+long longitude; // Like x coordinate
+
+bool hasCone;
+long conePos;
+
+long latitudes[20];
+long longitudes[20];
+bool cones[20];
+int numWaypoints;
+
+int currentWaypoint = 0;
+
+long distToNextWaypoint = 0;
+int angleToNextWaypoint = 0;
+
+int us_left = 255;
+int us_right = 255;
+
+task btComm() {
+  while(true) {
+    while( !BTCommCheck(0) ) {
+      hasBluetooth = false;
+      ClearScreen();
+      TextOut( 0, LCD_LINE1, "No BT connection" );
+      Wait(1000);
+    }
+
+    hasBluetooth = true;
+
+    string msg = BTReceiveMessage(0, 0, true);
+    if (msg=="") continue;
+    msgIn = msg;
+
+    // Parse the message that was received
+    int startIndex = 0;
+    long buffer[3];
+    int bufferIndex = 0;
+    for (int i = 0; i < strlen(msg); i++) {
+      if (msg[i] == ':') {
+         string num = SubStr(msg, startIndex, i-startIndex);
+         startIndex = i+1;
+         buffer[bufferIndex++] = StrToNum(num);
+      }
+    }
+
+    string num = SubStr(msg, startIndex, strlen(msg) - startIndex);
+    buffer[bufferIndex++] = StrToNum(num);
+
+    latitude = buffer[0];
+    longitude = buffer[1];
+
+    if (bufferIndex > 2) {
+      hasCone = true;
+      conePos = buffer[2];
+    } else {
+      hasCone = false;
+    }
+
+    BTSendMessage(0, 0, msgOut);
+    // Optional delay to slow down the rate of message transfer and maybe (?) save battery
+    //Wait(100);
+  }
+}
+
+byte USSingleShot(byte port)
+{
+   WriteI2CRegister(port, I2C_ADDR_DEFAULT, I2C_REG_CMD, US_CMD_SINGLESHOT);
+   Wait(40);
+   return SensorUS(port);
+}
+
+
+task updateUS()
+{
+  while(true)
+  {
+    int val = USSingleShot(S2);
+    if(val < 250)
+      us_left = (us_left * 50 + val * 50)/100;
+    else
+      us_left = (us_left * 90 + val * 10)/100;
+    val = USSingleShot(S3);
+    if(val < 250)
+      us_right = (us_right * 50 + val * 50)/100;
+    else
+      us_right = (us_right * 90 + val * 10)/100;
+  }
+}
+
+void readWaypoints() {
+  unsigned int result, fsize;
+  byte handle;
+  
+  long rdataLong;
+  byte rdataByte;
+  
+  result = OpenFileRead("route.dat", fsize, handle);
+  numWaypoints = fsize/9;
+  if (result == LDR_SUCCESS) {
+    for(int i = 0; i < numWaypoints; i++) {
+      result = Read(handle, rdataLong);
+      latitudes[i] = rdataLong;
+      result = Read(handle, rdataLong);
+      longitudes[i] = rdataLong;
+      result = Read(handle, rdataByte);
+      cones[i] = rdataByte == 1 ? true : false;
+    }
+  }
+  CloseFile(handle);
+}
+
+void navigateToWaypoint() {
+  int compassSensor;
+
+  while(true) {
+    ClearScreen();
+    
+    // Update waypoint-relative vars
+    distToNextWaypoint = ((longitudes[currentWaypoint] - longitude) * (longitudes[currentWaypoint] - longitude)) + ((latitudes[currentWaypoint] - latitude) * (latitudes[currentWaypoint] - latitude));
+
+    int angleToWaypoint = atan2d(latitudes[currentWaypoint] - latitude, longitudes[currentWaypoint] - longitude);
+    compassSensor = SensorHTCompass(S4);
+    compassSensor = -compassSensor + 90;
+    if (compassSensor < -180) compassSensor += 360;
+    int relAngle = angleToWaypoint - compassSensor;
+    while(relAngle < -180) relAngle += 360;
+    while(relAngle >= 180) relAngle -= 360;
+
+    angleToNextWaypoint = relAngle;
+    
+    NumOut(0, LCD_LINE1, distToNextWaypoint);
+    NumOut(0, LCD_LINE2, SensorHTCompass(S4));
+    NumOut(0, LCD_LINE3, compassSensor);
+    NumOut(0, LCD_LINE4, angleToWaypoint);
+    NumOut(0, LCD_LINE5, angleToNextWaypoint);
+    
+    CircleOut(80, 20, 5);
+    float cosVal = cosd(angleToNextWaypoint);
+    float sinVal = sind(angleToNextWaypoint);
+    
+    LineOut(80 - (5*sinVal), 20 + (5*cosVal), 80 - (20*sinVal), 20 + (20*cosVal));
+    
+    Wait(100);
+    
+    if (distToNextWaypoint < 750) break;
+    
+    if (SENSOR_1 || (us_left < 50 && us_right < 50)) {
+      setDrive(-75, 0);
+      Wait(1000);
+      setDrive(0, 0);
+      continue;
+    }
+    
+    if (us_left < 100 && us_right < 100) {
+      if (us_left < us_right) {
+        setDrive(65, -100);
+      } else {
+        setDrive(65, 100);
+      }
+      continue;
+    }
+    
+    if (us_left < 100) {
+      setDrive(75, -50);
+      continue;
+    }
+    
+    if (us_right < 100) {
+      setDrive(75, 50);
+      continue;
+    }
+    
+    setDrive(100, angleToNextWaypoint);
+  }
+}
+
+bool searchForCone() {
+  if (!cones[currentWaypoint]) return true;
+
+  while (true) {
+    ClearScreen();
+    
+    if (hasCone) {
+      NumOut(0, LCD_LINE1, conePos);
+      CircleOut(50 + conePos/2, LCD_LINE2, 2);
+      setDrive(75, -conePos);
+    } else {
+      TextOut(0, LCD_LINE1, "No Cone");
+      setDrive(75, 75);
+    }
+    
+    if (distToNextWaypoint > 1500) return false;
+    
+    if (SENSOR_1) {
+      setDrive(0, 0);
+      Wait(1000);
+      return true;
+    }
+    
+    Wait(50);
+  }
+}
+
+task followWaypoints() {
+  while (currentWaypoint < numWaypoints) {
+    navigateToWaypoint();
+    bool result = searchForCone();
+    if (result) {
+      currentWaypoint++;
+    }
+  }
+}
+
+task main() {
+  SetSensorTouch(S1);
+  SetSensorLowspeed(S2);
+  SetSensorLowspeed(S3);
+  I2CWrite(S2, 0x41, 0x00);
+  I2CWrite(S3, 0x41, 0x00);
+  SetSensorLowspeed(S4);
+  
+  readWaypoints();
+  start btComm;
+  start updateUS;
+  start drive;
+  
+  until(hasBluetooth);
+  ClearScreen();
+  TextOut(0, LCD_LINE1, "Ready!");
+  until(ButtonPressed(BTNCENTER, FALSE));
+  until(!ButtonPressed(BTNCENTER, FALSE));
+  Wait(500);
+  
+  start followWaypoints;
+}

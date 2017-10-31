@@ -1,0 +1,54 @@
+#include "btio.nxc"
+
+bool hasBluetooth;
+string msgIn;
+string msgOut;
+
+task btComm() {
+  while(true) {
+    while( !BTCommCheck(0) ) {
+      hasBluetooth = false;
+      ClearScreen();
+      TextOut( 0, LCD_LINE1, "No BT connection" );
+      Wait(1000);
+    }
+
+    hasBluetooth = true;
+    
+    string msg = BTReceiveMessage(0, 0, true);
+    if (msg=="") continue;
+    msgIn = msg;
+    BTSendMessage(0, 0, msgOut);
+    // Optional delay to slow down the rate of message transfer and maybe (?) save battery
+    //Wait(100);
+  }
+}
+
+task Display() {
+  while(true) {
+    until(hasBluetooth);
+    ClearScreen();
+    TextOut(0, LCD_LINE1, msgIn);
+    TextOut(0, LCD_LINE2, msgOut);
+    Wait(50);
+  }
+}
+
+task Button() {
+  while(true) {
+    until(ButtonPressed(BTNCENTER, FALSE));
+    msgOut = "Serious";
+    until(!ButtonPressed(BTNCENTER, FALSE));
+    msgOut = "funny";
+  }
+}
+
+task main() {
+  msgOut = "Not Yet Initialized";
+  msgIn = "Not Yet Initialized";
+  hasBluetooth = false;
+  
+  start btComm;
+  start Display;
+  start Button;
+}

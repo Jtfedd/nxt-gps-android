@@ -1,0 +1,55 @@
+long latitudes[20];
+long longitudes[20];
+bool cones[20];
+int numWaypoints;
+
+task main() {
+  unsigned int result, fsize;
+  byte handle;
+  
+  long rdataLong;
+  byte rdataByte;
+  
+  result = OpenFileRead("route.dat", fsize, handle);
+  numWaypoints = fsize/9;
+  if (result == LDR_SUCCESS) {
+    for(int i = 0; i < numWaypoints; i++) {
+      result = Read(handle, rdataLong);
+      latitudes[i] = rdataLong;
+      result = Read(handle, rdataLong);
+      longitudes[i] = rdataLong;
+      result = Read(handle, rdataByte);
+      cones[i] = rdataByte == 1 ? true : false;
+    }
+  }
+  
+  int viewWaypoint = 0;
+  
+  while(true) {
+    ClearScreen();
+    
+    TextOut(0, LCD_LINE1, "Waypoint "+NumToStr(viewWaypoint+1)+"/"+NumToStr(numWaypoints));
+    NumOut(0, LCD_LINE3, latitudes[viewWaypoint]);
+    NumOut(0, LCD_LINE4, longitudes[viewWaypoint]);
+    if (cones[viewWaypoint]) {
+      TextOut(0, LCD_LINE5, "Cone");
+    } else {
+      TextOut(0, LCD_LINE5, "No Cone");
+    }
+    TextOut(0, LCD_LINE8, "Prev        Next");
+    
+    if (ButtonPressed(BTNLEFT, FALSE)) {
+      until(!ButtonPressed(BTNLEFT, FALSE));
+      viewWaypoint--;
+      if (viewWaypoint < 0) viewWaypoint = 0;
+    }
+    
+    if (ButtonPressed(BTNRIGHT, FALSE)) {
+      until(!ButtonPressed(BTNRIGHT, FALSE));
+      viewWaypoint++;
+      if (viewWaypoint >= numWaypoints) viewWaypoint = numWaypoints - 1;
+    }
+    
+    Wait(100);
+  }
+}
